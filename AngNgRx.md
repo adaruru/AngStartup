@@ -62,9 +62,7 @@
 
 
 
-## 5. Part A：先學 `@ngrx/signals`（SignalStore）
-
-這是最適合初學者的起點。
+## 5. Part A： `@ngrx/signals`（SignalStore）
 
 ### 5.1 安裝
 ```bash
@@ -214,8 +212,6 @@ export const initialOrderState: OrderState = {
 ### 6.4 Action
 ```ts
 // order.actions.ts
-import { createActionGroup, props, emptyProps } from '@ngrx/store';
-
 export const OrderActions = createActionGroup({
   source: 'Order',
   events: {
@@ -230,10 +226,6 @@ export const OrderActions = createActionGroup({
 ### 6.5 Reducer
 ```ts
 // order.reducer.ts
-import { createReducer, on } from '@ngrx/store';
-import { initialOrderState } from './order.state';
-import { OrderActions } from './order.actions';
-
 export const orderReducer = createReducer(
   initialOrderState,
   on(OrderActions.submitOrder, (state) => ({
@@ -315,13 +307,6 @@ export class OrderEffects {
 ### 6.8 註冊 Store 與 Effects（Standalone）
 ```ts
 // app.config.ts
-import { ApplicationConfig } from '@angular/core';
-import { provideStore, provideState } from '@ngrx/store';
-import { provideEffects } from '@ngrx/effects';
-import { orderReducer } from './state/order.reducer';
-import { OrderEffects } from './state/order.effects';
-import { provideStoreDevtools } from '@ngrx/store-devtools';
-
 export const appConfig: ApplicationConfig = {
   providers: [
     provideStore(),
@@ -334,11 +319,6 @@ export const appConfig: ApplicationConfig = {
 
 ### 6.9 元件怎麼用（dispatch + select）
 ```ts
-import { Component, inject } from '@angular/core';
-import { Store } from '@ngrx/store';
-import { OrderActions } from './state/order.actions';
-import { selectOrderLoading, selectOrderError } from './state/order.selectors';
-
 @Component({
   selector: 'app-checkout',
   template: `
@@ -361,8 +341,6 @@ export class CheckoutComponent {
   }
 }
 ```
-
-
 
 ## 7. Part C：`@ngxs/store` 是什麼
 
@@ -424,7 +402,9 @@ export class CartState {
 | 最適合 | feature state | 全站核心流程 | 偏好 OOP 寫法團隊 |
 | 資料存取位置（預設） | 記憶體（SignalStore instance） | 記憶體（Store state tree） | 記憶體（NGXS state container） |
 
-### 8.1 重要觀念：`State != Persistence`
+### 8.1 Persistence
+
+重要觀念：`State != Persistence`
 
 - 狀態管理（NgRx/NGXS/SignalStore）主要解決「執行中的一致性」。
 - 持久化（Persistence）主要解決「跨重整、跨重啟仍保留資料」。
@@ -432,27 +412,70 @@ export class CartState {
   - `狀態管理`：管資料流、更新規則、畫面同步。
   - `持久化策略`：決定哪些 state 要寫到 `localStorage/sessionStorage/IndexedDB` 或回寫後端。
 
-### 8.2 點餐機情境下，資料應該放哪裡
+### 8.2 State 分類
 
-| 資料類型 | 例子 | 真正資料來源（Source of Truth） | 前端預設存放 | 是否建議持久化 |
-|---|---|---|---|---|
-| Server State | 菜單、訂單、付款結果 | 後端資料庫 | 記憶體快取 | 視需求快取，最終仍以後端為準 |
-| UI State | loading、error、modal、目前 tab | 前端執行期 | 記憶體 | 通常不持久化 |
-| Draft State | 購物車草稿、結帳步驟進度 | 前端暫存 | 記憶體 | 可選擇持久化（提升 UX） |
+| 資料類型     | 例子                            |
+| ------------ | ------------------------------- |
+| Server State | 菜單、訂單、付款結果            |
+| UI State     | loading、error、modal、目前 tab |
+| Draft State  | 購物車草稿、結帳步驟進度        |
 
-### 8.3 為什麼不是所有狀態都要持久化
+### 8.2.1 分類完「下一步」要做的 5 個資料流決策決策
 
-- 會產生過期資料與版本不相容問題（部署新版本後舊資料格式可能壞掉）。
-- 可能有資安/隱私風險（共用裝置留下敏感資訊）。
-- 多分頁與跨裝置同步複雜度上升。
-- 某些狀態本來就短生命週期（例如 loading），持久化沒有價值。
+1. `Source of Truth`：最終以後端還是前端為準？
+2. `讀取策略`：進頁面時重抓 API，還是先用快取再背景更新？
+3. `寫入策略`：先改本地再同步，還是成功回應後才更新畫面？
+4. `Persistence`決策
+   1. 重整後要不要保留？
+      - 這份資料「重整後還需要」嗎？
+      - 資料保留行為涉及同分頁內`路由切換`，不會重整：留在記憶體 state。
+      - 資料保留行為涉及`重整`：做持久化( 可選 localStorage )，但只持久化必要欄位，並設計過期/版本策略。
+      - 資料保留行為涉及`跨分頁、跨裝置`：只靠 localStorage 不夠，通常要以後端資料為準。
 
-### 8.4 一句話決策規則
+   2. 不可持久化
+      - 會產生過期資料與版本不相容問題（部署新版本後舊資料格式可能壞掉）。
+      - 可能有資安/隱私風險（共用裝置留下敏感資訊）。
+      - 多分頁與跨裝置同步複雜度上升。
+      - 某些狀態本來就短生命週期（例如 loading），持久化沒有價值。
 
-- 問自己：這份資料「重整後還需要」嗎？
-- 資料保留行為涉及同分頁內`路由切換`，不會重整：留在記憶體 state。
-- 資料保留行為涉及`重整`：做持久化( 可選 localStorage )，但只持久化必要欄位，並設計過期/版本策略。
-- 資料保留行為涉及`跨分頁、跨裝置`：只靠 localStorage 不夠，通常要以後端資料為準。
+5. `失效策略`：多久過期、版本不相容時怎麼清除？
+
+### 8.2.2 點餐機可直接套用的決策範本
+
+- 先分類，再做 5 個資料流決策，最後才選工具（SignalStore / Store + Effects / NGXS）。
+
+- 若資料跨重整需要保留，才加持久化；不要預設全部寫進 localStorage。
+
+
+| 資料類型 | Source of Truth | 讀取策略 | 寫入策略 | Persistence 決策 | 失效策略 | 最終工具（建議） |
+|---|---|---|---|---|---|---|
+| Server State（菜單、訂單、付款結果） | 後端資料庫 | 進頁先顯示快取，再背景重抓 API | 以 API 成功回應為準再更新 store | 通常不強制持久化；若要快啟動可做快取 | TTL + 版本號；版本變更時清快取 | `@ngrx/store + @ngrx/effects` + `HttpClient` |
+| UI State（loading、error、modal） | 前端執行期 | 元件啟動時初始化 | 事件觸發即時更新 | 不持久化 | route 離開或流程結束即清空 | Angular component `signal`（必要時 `@ngrx/signals`） |
+| Draft State（購物車草稿、結帳進度） | 前端暫存 | 先讀本地草稿，再與菜單有效性比對 | 變更後節流寫入本地 | 建議持久化必要欄位提升 UX（例如 itemId、qty） | 設到期時間；提交訂單後清空 | `@ngrx/signals` + `localStorage`（hydration） |
+
+### 8.5 Boilerplate
+
+Boilerplate（樣板程式碼）
+
+- `Boilerplate` 指的是每個功能都要重複寫、結構很像的基礎程式碼。
+- 在狀態管理裡，常見重複是：action、reducer、selector、effect、測試檔案。
+- 所以很多人會說 `@ngrx/store + effects` 「boilerplate 比較多」。
+
+| 套件 | Boilerplate 感受 | 主要原因 |
+|---|---|---|
+| `@ngrx/signals` | 低到中 | 同一個 store 檔案就能放 state/computed/methods |
+| `@ngrx/store + effects` | 中到高 | 事件流切分明確，通常要拆多檔案 |
+| `@ngxs/store` | 中 | class + decorator 寫法較集中，但大型專案仍會分層 |
+
+Boilerplate 多不一定是壞事：
+- 成本：初期看起來慢、檔案多。
+- 收益：責任分離清楚、流程可追蹤、多人協作穩定。
+
+如何降低 NgRx Boilerplate（實務做法）：
+- 優先用 `createActionGroup`、`createFeature` 等 API 減少重複樣板。
+- 以功能切分資料夾（feature-first），不要把所有 action/reducer 混在一起。
+- 中小型功能先用 `SignalStore`，只在複雜跨頁流程使用 `Store + Effects`。
+- 用 NgRx schematics 產生骨架，再補商業邏輯，避免手刻大量樣板。
 
 
 

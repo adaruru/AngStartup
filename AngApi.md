@@ -332,3 +332,156 @@ it('should request menu items', () => {
   - 修正：先定義 interface，再串 API。
 - 問題：重複點擊送出造成重複訂單。
   - 修正：按鈕防連點 + `switchMap` + 後端冪等設計（若可配合）。
+
+## 14. Order API 完整流程：Component、Service、Effects
+
+### 14.1 先講角色分工（為什麼要拆）
+- `Component`：收集輸入、觸發事件、顯示畫面，不直接打 API。
+- `Service`：封裝 `HttpClient`，專職和後端溝通。
+- `Effects`：接住 action 後呼叫 service，處理成功/失敗，再回傳 action。
+- `Reducer/Selector`：把 effects 結果寫進 state，並提供畫面讀取。
+
+> 重點：`Component + Service + Effects` 是主幹；若要完整資料流，還需要 `Action/Reducer/Selector`。
+
+### 14.2 Order 功能最小檔案清單（NgRx + Effects）
+
+| 檔案 | 用途 | 必要性 |
+|---|---|---|
+| `models`/order.models.ts | 定義 `Order`、`CreateOrderPayload`、`PaymentResult` 型別 | 必要 |
+| `api`/order.service.ts | `HttpClient` 呼叫 `/api/orders` | 必要 |
+| `store`/order.actions.ts | 定義 `submitOrder / success / failure` 事件 | 必要 |
+| `store`/order.reducer.ts | 管理 `loading/error/order` 狀態變化 | 必要 |
+| `store`/order.selectors.ts | 提供元件讀取 `loading/error/orderId` | 必要 |
+| `store`/order.effects.ts | 呼叫 `OrderService`，分發成功失敗 action | 必要 |
+| `pages`/checkout/checkout.component.ts | 觸發下單、顯示 loading/error | 必要 |
+| shared/http/api.interceptor.ts | token、錯誤訊息、重試策略 | 建議 |
+| app.config.ts | 註冊 provideStore/provideState/provideEffects/provideHttpClient | 必要 |
+| environments/*.ts | 管理 API base URL | 建議 |
+| **/*.spec.ts | service/effects/reducer 測試 | 建議 |
+
+建議目錄（Order feature）：
+```text
+src/app/features/order/
+  models/order.models.ts
+  api/order.service.ts
+  store/order.actions.ts
+  store/order.reducer.ts
+  store/order.selectors.ts
+  store/order.effects.ts
+  pages/checkout/checkout.component.ts
+```
+
+### 14.3 一筆「送出訂單」的完整時序
+
+1. `CheckoutComponent` 觸發 `dispatch(OrderActions.submitOrder(payload))`
+2. `OrderEffects` 監聽 `submitOrder`
+3. `OrderEffects` 呼叫 `OrderService.createOrder(payload)`
+4. API 成功：dispatch `submitOrderSuccess(orderId)`；失敗：dispatch `submitOrderFailure(error)`
+5. `orderReducer` 更新 `loading/error/currentOrderId`
+6. `CheckoutComponent` 透過 selector 讀取最新狀態並更新 UI
+
+### 14.4 最小可教學骨架（Order）
+
+```ts
+// features/order/models/order.models.ts
+export interface CreateOrderPayload {
+  items: Array<{ itemId: string; qty: number }>;
+}
+
+export interface Order {
+  id: string;
+}
+```
+
+```ts
+// features/order/store/order.actions.ts
+import { createActionGroup, props } from '@ngrx/store';
+import { CreateOrderPayload } from '../models/order.models';
+
+export const OrderActions = createActionGroup({
+  source: 'Order',
+  events: {
+    'Submit Order': props<{ payload: CreateOrderPayload }>(),
+    'Submit Order Success': props<{ orderId: string }>(),
+    'Submit Order Failure': props<{ error: string }>()
+  }
+});
+```
+
+```ts
+// features/order/store/order.effects.ts
+import { Injectable, inject } from '@angular/core';
+import { Actions, createEffect, ofType } from '@ngrx/effects';
+import { catchError, map, of, switchMap } from 'rxjs';
+import { OrderActions } from './order.actions';
+import { OrderService } from '../api/order.service';
+
+@Injectable()
+export class OrderEffects {
+  private actions$ = inject(Actions);
+  private orderService = inject(OrderService);
+
+  submitOrder$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(OrderActions.submitOrder),
+      switchMap(({ payload }) =>
+        this.orderService.createOrder(payload).pipe(
+          map((order) => OrderActions.submitOrderSuccess({ orderId: order.id })),
+          catchError((e) => of(OrderActions.submitOrderFailure({ error: e.message ?? '下單失敗' })))
+        )
+      )
+    )
+  );
+}
+```
+
+```ts
+// features/order/api/order.service.ts
+import { HttpClient } from '@angular/common/http';
+import { Injectable, inject } from '@angular/core';
+import { Observable } from 'rxjs';
+import { CreateOrderPayload, Order } from '../models/order.models';
+
+@Injectable({ providedIn: 'root' })
+export class OrderService {
+  private http = inject(HttpClient);
+  private baseUrl = '/api/orders';
+
+  createOrder(payload: CreateOrderPayload): Observable<Order> {
+    return this.http.post<Order>(this.baseUrl, payload);
+  }
+}
+```
+
+```ts
+// features/order/pages/checkout/checkout.component.ts
+import { Component, inject } from '@angular/core';
+import { Store } from '@ngrx/store';
+import { OrderActions } from '../../store/order.actions';
+import { selectOrderLoading, selectOrderError } from '../../store/order.selectors';
+
+@Component({
+  selector: 'app-checkout',
+  template: `
+    <button [disabled]="loading()" (click)="submit()">送出訂單</button>
+    <p *ngIf="error()">{{ error() }}</p>
+  `
+})
+export class CheckoutComponent {
+  private store = inject(Store);
+  loading = this.store.selectSignal(selectOrderLoading);
+  error = this.store.selectSignal(selectOrderError);
+
+  submit() {
+    this.store.dispatch(
+      OrderActions.submitOrder({
+        payload: { items: [{ itemId: 'tea', qty: 1 }] }
+      })
+    );
+  }
+}
+```
+
+### 14.5 如果你不用 NgRx（只有 Component + Service）
+- 可行，但你需要自行處理：`loading`、`error`、流程追蹤、重複提交防護、測試隔離。
+- 專案小時可以先這樣做；流程複雜後建議升級到 `Store + Effects`。
