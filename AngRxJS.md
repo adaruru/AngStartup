@@ -4,6 +4,7 @@
 Observable
 
 - 一條會隨時間推送資料的資料流
+- 可取消、可組合、有時間序列的流程
 - 有時間軸的資料
 - 資料直播頻道
 
@@ -35,8 +36,6 @@ Angular api 框架使用 `HttpClient` 回傳的是 Observable，不是 Promise�
    retry、catchError、debounceTime、throttle、switchMap 這些在 RxJS 很完整。
 4. 與 Angular 生態一致
    Router、事件、NgRx Effects 都是流式思維，用 Observable 心智模型一致。
-
-
 
 ## Promise 比較
 
